@@ -1,0 +1,10 @@
+{
+  "name": "MedConnect",
+  "short_name": "MedConnect",
+  "description": "Connected healthcare for patients, doctors and hospitals.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#edeae4",
+  "theme_color": "#0d3d35",
+  "icons": []
+}
