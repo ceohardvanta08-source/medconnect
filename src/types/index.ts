@@ -120,3 +120,52 @@ export interface ServiceCard {
   title: string;
   desc: string;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   Hospital system — hospital registration, machines/equipment,
+   test types, and doctor accounts issued by a hospital.
+   ──────────────────────────────────────────────────────────────── */
+
+/** A single machine or piece of equipment a hospital tracks. */
+export interface HospitalResource {
+  id: string;
+  name: string;
+  /** e.g. "Diagnostic", "ICU", "Surgical", "Life Support" */
+  category: string;
+  /** How many units the hospital has of this resource. */
+  quantity: number;
+  /** Whether this resource is currently operational / in service. */
+  active: boolean;
+}
+
+/** A diagnostic or lab test type a hospital offers. */
+export interface HospitalTestType {
+  id: string;
+  name: string;
+  /** Whether this test is currently being offered. */
+  active: boolean;
+}
+
+/** A doctor account issued by a specific hospital. */
+export interface DoctorRecord {
+  id: string;
+  /** The unique login code the doctor uses — issued by the hospital. */
+  doctorCode: string;
+  name: string;
+  specialty: string;
+  hospitalId: string;
+}
+
+/** A registered hospital, including everything it manages. */
+export interface HospitalRecord {
+  id: string;
+  /** The unique login code the hospital uses to sign in. */
+  hospitalCode: string;
+  name: string;
+  address: string;
+  contactNumber: string;
+  resources: HospitalResource[];
+  testTypes: HospitalTestType[];
+  doctors: DoctorRecord[];
+  registeredAt: string;
+}

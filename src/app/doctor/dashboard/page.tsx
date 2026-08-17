@@ -1,13 +1,11 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import type { StatItem } from "@/types";
-
-export const metadata: Metadata = {
-  title: "Doctor Dashboard — MedConnect",
-  description: "Manage your patient queue, referrals and prescriptions.",
-};
+import { clearDoctorSession, getDoctorSession } from "@/lib/session";
+import type { DoctorRecord, HospitalRecord, StatItem } from "@/types";
 
 const STATS: StatItem[] = [
   { label: "Patients today", value: "8", sub: "3 checked in" },
@@ -22,6 +20,38 @@ const QUEUE = [
 ];
 
 export default function DoctorDashboardPage() {
+  const [doctor, setDoctor] = useState<DoctorRecord | null>(null);
+  const [hospital, setHospital] = useState<HospitalRecord | null>(null);
+
+  useEffect(() => {
+    const savedCode = getDoctorSession();
+    if (!savedCode) return; // no session — page still shows a generic demo view below
+
+    fetch("/api/doctors/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doctorCode: savedCode }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.doctor) setDoctor(data.doctor);
+        if (data.hospital) setHospital(data.hospital);
+      })
+      .catch(() => {
+        // Silently fall back to the generic demo view if the lookup fails.
+      });
+  }, []);
+
+  function handleLogout() {
+    clearDoctorSession();
+    setDoctor(null);
+    setHospital(null);
+  }
+
+  const displayName = doctor ? doctor.name : "Doctor";
+  const displaySpecialty = doctor ? doctor.specialty : "General Physician";
+  const hospitalName = hospital ? hospital.name : null;
+
   return (
     <>
       <Navbar />
@@ -29,14 +59,26 @@ export default function DoctorDashboardPage() {
         <div className="mc-page__head">
           <div>
             <p className="mc-page__breadcrumb">MedConnect / Doctor Portal</p>
-            <h1 className="mc-page__title">Good morning, Doctor</h1>
+            <h1 className="mc-page__title">Good morning, {displayName}</h1>
             <p className="mc-page__subtitle">
-              Dr. Meera Rao · General Physician · Verified
+              {displaySpecialty}
+              {hospitalName ? ` · ${hospitalName}` : ""} · Verified
             </p>
           </div>
-          <Link href="/doctor/patients" className="mc-btn mc-btn--primary">
-            View all patients
-          </Link>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <Link href="/doctor/patients" className="mc-btn mc-btn--primary">
+              View all patients
+            </Link>
+            {doctor && (
+              <button
+                type="button"
+                className="mc-btn mc-btn--outline"
+                onClick={handleLogout}
+              >
+                Log out
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mc-grid-3">

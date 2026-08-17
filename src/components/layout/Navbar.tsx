@@ -7,7 +7,7 @@ import { PlusIcon, MenuIcon, CloseIcon } from "@/components/icons";
 const NAV_LINKS = [
   { href: "/#home", label: "Home" },
   { href: "/#services", label: "Services" },
-  { href: "/#portal", label: "Portal" },
+  { href: "/hospitals", label: "Hospitals" },
   { href: "/emergency", label: "Emergency" },
   { href: "/#about", label: "About" },
 ];

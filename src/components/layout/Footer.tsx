@@ -11,6 +11,8 @@ const FOOTER_COLUMNS: {
       { label: "Services", href: "/#services" },
       { label: "Patient portal", href: "/patient/dashboard" },
       { label: "Doctor portal", href: "/doctor/dashboard" },
+      { label: "Hospital directory", href: "/hospitals" },
+      { label: "Register a hospital", href: "/login" },
     ],
   },
   {
