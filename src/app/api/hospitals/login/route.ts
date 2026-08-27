@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
-import { findHospitalByCode } from "@/lib/hospitalStore";
+import { loginHospital } from "@/lib/data";
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { hospitalCode } = body ?? {};
+  const body = await request.json().catch(() => ({}));
+  const { hospitalCode, password } = body ?? {};
 
-    if (!hospitalCode) {
-      return NextResponse.json({ error: "hospitalCode is required." }, { status: 400 });
-    }
-
-    const hospital = findHospitalByCode(hospitalCode);
-    if (!hospital) {
-      return NextResponse.json(
-        { error: "No hospital found with that ID." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({ hospital });
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  if (!hospitalCode || !password) {
+    return NextResponse.json(
+      { error: "Hospital ID and password are both required." },
+      { status: 400 }
+    );
   }
+
+  const result = loginHospital(hospitalCode, password);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 401 });
+  }
+  return NextResponse.json({ hospital: result.hospital });
 }

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { clearHospitalSession, getHospitalSession } from "@/lib/session";
-import type { HospitalRecord } from "@/types";
+import type { HospitalRecord, StatusValue } from "@/lib/data";
+import { DOCTOR_SPECIALTIES } from "@/lib/data";
 
 const RESOURCE_CATEGORIES = [
   "Diagnostic",
@@ -16,11 +17,104 @@ const RESOURCE_CATEGORIES = [
   "Other",
 ];
 
+// Available -> Occupied -> Maintenance -> back to Available
+const STATUS_META: Record<StatusValue, { label: string; bg: string; fg: string }> = {
+  available: { label: "Available", bg: "rgba(34,197,94,0.15)", fg: "#22c55e" },
+  occupied: { label: "Occupied", bg: "rgba(249,115,22,0.15)", fg: "#f97316" },
+  maintenance: { label: "Maintenance", bg: "rgba(148,163,184,0.18)", fg: "#94a3b8" },
+};
+
+function StatusBadge({ status, onClick }: { status: StatusValue; onClick: () => void }) {
+  const meta = STATUS_META[status];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Click to change status"
+      style={{
+        border: "none",
+        cursor: "pointer",
+        borderRadius: "999px",
+        padding: "4px 12px",
+        fontSize: "12px",
+        fontWeight: 700,
+        letterSpacing: ".03em",
+        textTransform: "uppercase",
+        background: meta.bg,
+        color: meta.fg,
+      }}
+    >
+      {meta.label}
+    </button>
+  );
+}
+
+/** Small live indicator dot + label, reused in a couple of places on this page */
+function LiveIndicator({ lastSynced }: { lastSynced: Date | null }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <span
+        style={{
+          width: "8px",
+          height: "8px",
+          borderRadius: "999px",
+          background: "#22c55e",
+          display: "inline-block",
+          animation: "mc-live-pulse 1.8s ease-in-out infinite",
+        }}
+        aria-hidden="true"
+      />
+      <span
+        style={{
+          fontSize: "11px",
+          fontWeight: 800,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          color: "#16a34a",
+        }}
+      >
+        Live
+      </span>
+      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+        {lastSynced ? `Updated ${lastSynced.toLocaleTimeString()}` : "Syncing..."}
+      </span>
+    </div>
+  );
+}
+
+/** Small colored count pill used in the equipment status strip */
+function CountPill({ label, count, color }: { label: string; count: number; color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        fontSize: "12px",
+        fontWeight: 700,
+        color: "var(--text-body)",
+        background: "var(--card, #fff)",
+        border: "1px solid var(--border, rgba(0,0,0,0.08))",
+        borderRadius: "999px",
+        padding: "5px 12px",
+      }}
+    >
+      <span
+        style={{ width: "8px", height: "8px", borderRadius: "999px", background: color }}
+        aria-hidden="true"
+      />
+      {count} {label}
+    </span>
+  );
+}
+
 export default function HospitalDashboardPage() {
   const router = useRouter();
   const [hospital, setHospital] = useState<HospitalRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [respondingAlertId, setRespondingAlertId] = useState<string | null>(null);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
   // Add-resource form state
   const [resourceName, setResourceName] = useState("");
@@ -32,8 +126,9 @@ export default function HospitalDashboardPage() {
 
   // Add-doctor form state
   const [doctorName, setDoctorName] = useState("");
-  const [doctorSpecialty, setDoctorSpecialty] = useState("");
+  const [doctorSpecialty, setDoctorSpecialty] = useState<string>(DOCTOR_SPECIALTIES[0]);
   const [newDoctorCode, setNewDoctorCode] = useState<string | null>(null);
+  const [newDoctorPassword, setNewDoctorPassword] = useState<string | null>(null);
 
   const hospitalId = hospital?.id;
 
@@ -47,6 +142,7 @@ export default function HospitalDashboardPage() {
         setNotFound(true);
       } else {
         setHospital(found);
+        setLastSynced(new Date());
       }
     } finally {
       setLoading(false);
@@ -62,6 +158,15 @@ export default function HospitalDashboardPage() {
     loadHospital(savedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Poll every 8 seconds so bed occupancy, patient counts, and SOS alerts
+  // update live without a manual refresh.
+  useEffect(() => {
+    if (!hospitalId) return;
+    const interval = setInterval(() => loadHospital(hospitalId), 8000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hospitalId]);
 
   function handleLogout() {
     clearHospitalSession();
@@ -89,7 +194,7 @@ export default function HospitalDashboardPage() {
     }
   }
 
-  async function handleToggleResource(resourceId: string) {
+  async function handleCycleResource(resourceId: string) {
     if (!hospitalId) return;
     const response = await fetch(
       `/api/hospitals/${hospitalId}/resources/${resourceId}`,
@@ -114,7 +219,7 @@ export default function HospitalDashboardPage() {
     }
   }
 
-  async function handleToggleTest(testId: string) {
+  async function handleCycleTest(testId: string) {
     if (!hospitalId) return;
     const response = await fetch(`/api/hospitals/${hospitalId}/tests/${testId}`, {
       method: "PATCH",
@@ -135,9 +240,25 @@ export default function HospitalDashboardPage() {
 
     if (response.ok) {
       setNewDoctorCode(data.doctor.doctorCode);
+      setNewDoctorPassword(data.tempPassword);
       setDoctorName("");
-      setDoctorSpecialty("");
+      setDoctorSpecialty(DOCTOR_SPECIALTIES[0]);
       await loadHospital(hospitalId);
+    }
+  }
+
+  async function handleRespondAlert(alertId: string, status: "accepted" | "declined") {
+    if (!hospitalId) return;
+    setRespondingAlertId(alertId);
+    try {
+      const response = await fetch(`/api/hospitals/${hospitalId}/emergency?alertId=${alertId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (response.ok) await loadHospital(hospitalId);
+    } finally {
+      setRespondingAlertId(null);
     }
   }
 
@@ -170,11 +291,41 @@ export default function HospitalDashboardPage() {
     );
   }
 
-  const activeResourceCount = hospital.resources.filter((r) => r.active).length;
-  const activeTestCount = hospital.testTypes.filter((t) => t.active).length;
+  // ---- Live capacity numbers, derived from existing resource data ----
+  // Any resource with category "Bed" represents bed capacity. Its quantity
+  // is how many beds that entry represents, and its status tells us whether
+  // that block of beds is available, occupied, or under maintenance.
+  // "Patients admitted now" = total occupied bed capacity. This needs no
+  // separate patient-tracking system, and it updates live on every poll.
+  const bedResources = hospital.resources.filter((r) => r.category === "Bed");
+  const totalBedCapacity = bedResources.reduce((sum, r) => sum + r.quantity, 0);
+  const occupiedBedCapacity = bedResources
+    .filter((r) => r.status === "occupied")
+    .reduce((sum, r) => sum + r.quantity, 0);
+  const availableBedCapacity = bedResources
+    .filter((r) => r.status === "available")
+    .reduce((sum, r) => sum + r.quantity, 0);
+  const maintenanceBedCapacity = totalBedCapacity - occupiedBedCapacity - availableBedCapacity;
+  const occupancyPct =
+    totalBedCapacity > 0 ? Math.round((occupiedBedCapacity / totalBedCapacity) * 100) : 0;
+  const occupancyColor = occupancyPct >= 90 ? "#ef4444" : occupancyPct >= 70 ? "#f97316" : "#22c55e";
+
+  // Equipment/machines status strip (every resource, beds included)
+  const equipAvailable = hospital.resources.filter((r) => r.status === "available").length;
+  const equipOccupied = hospital.resources.filter((r) => r.status === "occupied").length;
+  const equipMaintenance = hospital.resources.filter((r) => r.status === "maintenance").length;
+
+  const activeTestCount = hospital.testTypes.filter((t) => t.status === "available").length;
+  const pendingAlerts = hospital.emergencyAlerts.filter((a) => a.status === "pending");
 
   return (
     <>
+      <style>{`
+        @keyframes mc-live-pulse {
+          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.45); }
+          50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+        }
+      `}</style>
       <Navbar />
       <main className="mc-page">
         <div className="mc-page__head">
@@ -192,17 +343,148 @@ export default function HospitalDashboardPage() {
           </button>
         </div>
 
+        {/* Emergency SOS alerts — always at the very top so nothing gets missed */}
+        {pendingAlerts.length > 0 && (
+          <div
+            style={{
+              marginBottom: "28px",
+              border: "2px solid #ef4444",
+              borderRadius: "14px",
+              background: "rgba(239,68,68,0.06)",
+              padding: "18px 20px",
+            }}
+          >
+            <p
+              style={{
+                fontWeight: 800,
+                color: "#ef4444",
+                marginBottom: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              🚨 {pendingAlerts.length} emergency alert{pendingAlerts.length > 1 ? "s" : ""}{" "}
+              awaiting response
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {pendingAlerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  style={{
+                    background: "var(--card-bg, #fff)",
+                    borderRadius: "10px",
+                    padding: "14px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <p style={{ fontWeight: 700 }}>{alert.message}</p>
+                    <p className="mc-card__sub">
+                      {alert.location ? `${alert.location} · ` : ""}
+                      {alert.contactNumber ? `${alert.contactNumber} · ` : ""}
+                      {new Date(alert.createdAt).toLocaleTimeString()}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="mc-btn mc-btn--primary"
+                      disabled={respondingAlertId === alert.id}
+                      onClick={() => handleRespondAlert(alert.id, "accepted")}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="mc-btn mc-btn--outline"
+                      disabled={respondingAlertId === alert.id}
+                      onClick={() => handleRespondAlert(alert.id, "declined")}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Live capacity overview ---- */}
+        <div style={{ marginBottom: "10px" }}>
+          <LiveIndicator lastSynced={lastSynced} />
+        </div>
+
+        <div className="mc-grid-3" style={{ marginBottom: "14px" }}>
+          <div className="mc-card" style={{ borderLeft: "4px solid #ef4444" }}>
+            <p className="mc-card__title">Patients admitted now</p>
+            <p className="mc-card__num">{occupiedBedCapacity}</p>
+            <p className="mc-card__sub">Based on occupied bed capacity</p>
+          </div>
+          <div className="mc-card" style={{ borderLeft: "4px solid #22c55e" }}>
+            <p className="mc-card__title">Beds available</p>
+            <p className="mc-card__num">{availableBedCapacity}</p>
+            <p className="mc-card__sub">of {totalBedCapacity} total bed capacity</p>
+          </div>
+          <div className="mc-card" style={{ borderLeft: "4px solid #f97316" }}>
+            <p className="mc-card__title">Bed occupancy</p>
+            <p className="mc-card__num">{occupancyPct}%</p>
+            <p className="mc-card__sub">{maintenanceBedCapacity} beds under maintenance</p>
+          </div>
+        </div>
+
+        {totalBedCapacity > 0 ? (
+          <div style={{ marginBottom: "28px" }}>
+            <div
+              style={{
+                height: "10px",
+                borderRadius: "999px",
+                background: "rgba(0,0,0,0.06)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${occupancyPct}%`,
+                  height: "100%",
+                  background: occupancyColor,
+                  transition: "width .5s ease",
+                }}
+              />
+            </div>
+            <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "6px" }}>
+              {occupiedBedCapacity} of {totalBedCapacity} beds occupied · {availableBedCapacity} available ·{" "}
+              {maintenanceBedCapacity} under maintenance
+            </p>
+          </div>
+        ) : (
+          <p
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              marginBottom: "28px",
+            }}
+          >
+            Add a resource with category &quot;Bed&quot; below to start tracking live bed
+            capacity and patient counts.
+          </p>
+        )}
+
         {/* Stats */}
         <div className="mc-grid-3">
           <div className="mc-card">
             <p className="mc-card__title">Resources / Machines</p>
             <p className="mc-card__num">{hospital.resources.length}</p>
-            <p className="mc-card__sub">{activeResourceCount} currently active</p>
+            <p className="mc-card__sub">{equipAvailable} currently available</p>
           </div>
           <div className="mc-card">
             <p className="mc-card__title">Test types offered</p>
             <p className="mc-card__num">{hospital.testTypes.length}</p>
-            <p className="mc-card__sub">{activeTestCount} currently active</p>
+            <p className="mc-card__sub">{activeTestCount} currently available</p>
           </div>
           <div className="mc-card">
             <p className="mc-card__title">Doctors on staff</p>
@@ -213,9 +495,23 @@ export default function HospitalDashboardPage() {
 
         {/* Resources */}
         <div className="mc-mt-32">
-          <h2 className="mc-h3" style={{ marginBottom: "16px" }}>
-            Machines &amp; equipment
-          </h2>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px",
+              marginBottom: "16px",
+            }}
+          >
+            <h2 className="mc-h3">Machines &amp; equipment</h2>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <CountPill label="available" count={equipAvailable} color="#22c55e" />
+              <CountPill label="occupied" count={equipOccupied} color="#f97316" />
+              <CountPill label="in maintenance" count={equipMaintenance} color="#94a3b8" />
+            </div>
+          </div>
           <div className="mc-grid-2">
             <div className="mc-card">
               <p style={{ fontWeight: 700, marginBottom: "14px" }}>Add a resource</p>
@@ -265,6 +561,10 @@ export default function HospitalDashboardPage() {
                     />
                   </div>
                 </div>
+                <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "-8px 0 14px" }}>
+                  Tip: use category &quot;Bed&quot; for ward/ICU beds so they count toward the
+                  live patient and capacity numbers above.
+                </p>
                 <button type="submit" className="mc-btn mc-btn--primary mc-btn--full">
                   Add resource
                 </button>
@@ -280,7 +580,7 @@ export default function HospitalDashboardPage() {
                 {hospital.resources.map((resource) => (
                   <div key={resource.id} className="mc-list-item">
                     <div className="mc-list-item__icon" aria-hidden="true">
-                      🩻
+                      {resource.category === "Bed" ? "🛏️" : "🩻"}
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="mc-list-item__title">{resource.name}</div>
@@ -288,16 +588,10 @@ export default function HospitalDashboardPage() {
                         {resource.category} · Qty {resource.quantity}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className={`mc-badge ${
-                        resource.active ? "mc-badge--success" : "mc-badge--danger"
-                      }`}
-                      style={{ border: "none", cursor: "pointer" }}
-                      onClick={() => handleToggleResource(resource.id)}
-                    >
-                      {resource.active ? "Active" : "Inactive"}
-                    </button>
+                    <StatusBadge
+                      status={resource.status}
+                      onClick={() => handleCycleResource(resource.id)}
+                    />
                   </div>
                 ))}
               </div>
@@ -347,16 +641,10 @@ export default function HospitalDashboardPage() {
                     <div style={{ flex: 1 }}>
                       <div className="mc-list-item__title">{test.name}</div>
                     </div>
-                    <button
-                      type="button"
-                      className={`mc-badge ${
-                        test.active ? "mc-badge--success" : "mc-badge--danger"
-                      }`}
-                      style={{ border: "none", cursor: "pointer" }}
-                      onClick={() => handleToggleTest(test.id)}
-                    >
-                      {test.active ? "Active" : "Inactive"}
-                    </button>
+                    <StatusBadge
+                      status={test.status}
+                      onClick={() => handleCycleTest(test.id)}
+                    />
                   </div>
                 ))}
               </div>
@@ -373,7 +661,7 @@ export default function HospitalDashboardPage() {
             <div className="mc-card">
               <p style={{ fontWeight: 700, marginBottom: "14px" }}>Issue a new Doctor ID</p>
 
-              {newDoctorCode && (
+              {newDoctorCode && newDoctorPassword && (
                 <div
                   style={{
                     background: "var(--accent-light)",
@@ -382,11 +670,15 @@ export default function HospitalDashboardPage() {
                     padding: "10px 14px",
                     borderRadius: "8px",
                     marginBottom: "16px",
+                    lineHeight: 1.6,
                   }}
                 >
-                  Doctor ID generated:{" "}
-                  <strong>{newDoctorCode}</strong> — share this with the
-                  doctor so they can log in.
+                  Doctor ID generated: <strong>{newDoctorCode}</strong>
+                  <br />
+                  Starting password: <strong>{newDoctorPassword}</strong>
+                  <br />
+                  Share both with the doctor — they should change the
+                  password after first login (Phase 2).
                 </div>
               )}
 
@@ -408,14 +700,18 @@ export default function HospitalDashboardPage() {
                   <label className="mc-auth__label" htmlFor="doctorSpecialty">
                     Specialty
                   </label>
-                  <input
+                  <select
                     id="doctorSpecialty"
-                    type="text"
                     className="mc-auth__input"
-                    placeholder="General Physician"
                     value={doctorSpecialty}
                     onChange={(event) => setDoctorSpecialty(event.target.value)}
-                  />
+                  >
+                    {DOCTOR_SPECIALTIES.map((specialty) => (
+                      <option key={specialty} value={specialty}>
+                        {specialty}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <button type="submit" className="mc-btn mc-btn--primary mc-btn--full">
                   Generate Doctor ID
@@ -446,6 +742,43 @@ export default function HospitalDashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Emergency alert history (accepted/declined) */}
+        {hospital.emergencyAlerts.length > pendingAlerts.length && (
+          <div className="mc-mt-32">
+            <h2 className="mc-h3" style={{ marginBottom: "16px" }}>
+              Past emergency alerts
+            </h2>
+            <div className="mc-card">
+              <div className="mc-list">
+                {hospital.emergencyAlerts
+                  .filter((a) => a.status !== "pending")
+                  .map((alert) => (
+                    <div key={alert.id} className="mc-list-item">
+                      <div className="mc-list-item__icon" aria-hidden="true">
+                        {alert.status === "accepted" ? "✅" : "❌"}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div className="mc-list-item__title">{alert.message}</div>
+                        <div className="mc-list-item__sub">
+                          {new Date(alert.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <span
+                        className={`mc-badge ${
+                          alert.status === "accepted"
+                            ? "mc-badge--success"
+                            : "mc-badge--danger"
+                        }`}
+                      >
+                        {alert.status === "accepted" ? "Accepted" : "Declined"}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
       <Footer />
     </>

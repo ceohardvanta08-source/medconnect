@@ -4,8 +4,12 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import { saveDoctorSession, saveHospitalSession } from "@/lib/session";
-import type { HospitalRecord } from "@/types";
+import {
+  saveDoctorSession,
+  saveHospitalSession,
+  savePatientSession,
+} from "@/lib/session";
+import type { HospitalRecord } from "@/lib/data";
 
 type LoginRole = "patient" | "hospital" | "doctor";
 type HospitalMode = "login" | "register";
@@ -16,20 +20,24 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Patient fields (Phase 1 demo — no real auth yet)
+  // Patient fields (Phase 1 demo — no real backend account store yet)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   // Hospital fields
   const [hospitalMode, setHospitalMode] = useState<HospitalMode>("login");
   const [hospitalCode, setHospitalCode] = useState("");
+  const [hospitalLoginPassword, setHospitalLoginPassword] = useState("");
   const [hospitalName, setHospitalName] = useState("");
   const [hospitalAddress, setHospitalAddress] = useState("");
   const [hospitalContact, setHospitalContact] = useState("");
+  const [hospitalPassword, setHospitalPassword] = useState("");
+  const [hospitalPasswordConfirm, setHospitalPasswordConfirm] = useState("");
   const [registeredHospital, setRegisteredHospital] = useState<HospitalRecord | null>(null);
 
   // Doctor fields
   const [doctorCode, setDoctorCode] = useState("");
+  const [doctorPassword, setDoctorPassword] = useState("");
 
   function resetMessages() {
     setError(null);
@@ -43,9 +51,15 @@ export default function LoginPage() {
       setError("Please enter both email and password.");
       return;
     }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
 
-    // Phase 1 demo: no real authentication yet — routes straight to the
-    // dashboard. Phase 2 wires this up to NextAuth + a database.
+    // Phase 1 demo: no real authentication backend yet — routes straight to
+    // the dashboard once basic validation passes. Phase 2 wires this up to
+    // NextAuth + a database.
+    savePatientSession(email);
     router.push("/patient/dashboard");
   }
 
@@ -53,8 +67,8 @@ export default function LoginPage() {
     event.preventDefault();
     resetMessages();
 
-    if (!hospitalCode) {
-      setError("Please enter your Hospital ID.");
+    if (!hospitalCode || !hospitalLoginPassword) {
+      setError("Please enter your Hospital ID and password.");
       return;
     }
 
@@ -63,12 +77,15 @@ export default function LoginPage() {
       const response = await fetch("/api/hospitals/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hospitalCode }),
+        body: JSON.stringify({
+          hospitalCode,
+          password: hospitalLoginPassword,
+        }),
       });
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error ?? "Login failed. Please check your Hospital ID.");
+        setError(data.error ?? "Login failed. Please check your Hospital ID and password.");
         return;
       }
 
@@ -85,8 +102,16 @@ export default function LoginPage() {
     event.preventDefault();
     resetMessages();
 
-    if (!hospitalName || !hospitalAddress || !hospitalContact) {
-      setError("Please fill in all fields.");
+    if (!hospitalName || !hospitalAddress || !hospitalContact || !hospitalPassword) {
+      setError("Please fill in all fields, including a password.");
+      return;
+    }
+    if (hospitalPassword.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    if (hospitalPassword !== hospitalPasswordConfirm) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -99,6 +124,7 @@ export default function LoginPage() {
           name: hospitalName,
           address: hospitalAddress,
           contactNumber: hospitalContact,
+          password: hospitalPassword,
         }),
       });
       const data = await response.json();
@@ -126,8 +152,8 @@ export default function LoginPage() {
     event.preventDefault();
     resetMessages();
 
-    if (!doctorCode) {
-      setError("Please enter your Doctor ID.");
+    if (!doctorCode || !doctorPassword) {
+      setError("Please enter your Doctor ID and password.");
       return;
     }
 
@@ -136,12 +162,12 @@ export default function LoginPage() {
       const response = await fetch("/api/doctors/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doctorCode }),
+        body: JSON.stringify({ doctorCode, password: doctorPassword }),
       });
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error ?? "Login failed. Please check your Doctor ID.");
+        setError(data.error ?? "Login failed. Please check your Doctor ID and password.");
         return;
       }
 
@@ -251,12 +277,7 @@ export default function LoginPage() {
                   Log in as Patient
                 </button>
               </form>
-
-              <p className="mc-auth__footer">
-                This is a Phase 1 demo — no account is required.
-                <br />
-                Any email and password will work.
-              </p>
+            
             </>
           )}
 
@@ -304,6 +325,22 @@ export default function LoginPage() {
                       placeholder="MC-HOS-XXXX"
                       value={hospitalCode}
                       onChange={(event) => setHospitalCode(event.target.value)}
+                      autoComplete="username"
+                    />
+                  </div>
+
+                  <div className="mc-auth__field">
+                    <label className="mc-auth__label" htmlFor="hospitalLoginPassword">
+                      Password
+                    </label>
+                    <input
+                      id="hospitalLoginPassword"
+                      type="password"
+                      className="mc-auth__input"
+                      placeholder="••••••••"
+                      value={hospitalLoginPassword}
+                      onChange={(event) => setHospitalLoginPassword(event.target.value)}
+                      autoComplete="current-password"
                     />
                   </div>
 
@@ -361,6 +398,36 @@ export default function LoginPage() {
                     />
                   </div>
 
+                  <div className="mc-auth__field">
+                    <label className="mc-auth__label" htmlFor="hospitalPassword">
+                      Create a password
+                    </label>
+                    <input
+                      id="hospitalPassword"
+                      type="password"
+                      className="mc-auth__input"
+                      placeholder="At least 6 characters"
+                      value={hospitalPassword}
+                      onChange={(event) => setHospitalPassword(event.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </div>
+
+                  <div className="mc-auth__field">
+                    <label className="mc-auth__label" htmlFor="hospitalPasswordConfirm">
+                      Confirm password
+                    </label>
+                    <input
+                      id="hospitalPasswordConfirm"
+                      type="password"
+                      className="mc-auth__input"
+                      placeholder="Re-enter password"
+                      value={hospitalPasswordConfirm}
+                      onChange={(event) => setHospitalPasswordConfirm(event.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </div>
+
                   <button
                     type="submit"
                     className="mc-btn mc-btn--primary mc-btn--full"
@@ -411,9 +478,10 @@ export default function LoginPage() {
                         marginTop: "8px",
                       }}
                     >
-                      Use this ID to log in to your Hospital Portal any time.
-                      This is also what you&apos;ll give to your doctors so
-                      they can request their own Doctor IDs.
+                      Use this ID + the password you just created to log in to
+                      your Hospital Portal any time. This is also what
+                      you&apos;ll give to your doctors so they can request
+                      their own Doctor IDs.
                     </p>
                   </div>
 
@@ -444,6 +512,22 @@ export default function LoginPage() {
                     placeholder="MC-DOC-XXXX"
                     value={doctorCode}
                     onChange={(event) => setDoctorCode(event.target.value)}
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div className="mc-auth__field">
+                  <label className="mc-auth__label" htmlFor="doctorPassword">
+                    Password
+                  </label>
+                  <input
+                    id="doctorPassword"
+                    type="password"
+                    className="mc-auth__input"
+                    placeholder="••••••••"
+                    value={doctorPassword}
+                    onChange={(event) => setDoctorPassword(event.target.value)}
+                    autoComplete="current-password"
                   />
                 </div>
 
@@ -458,7 +542,8 @@ export default function LoginPage() {
 
               <p className="mc-auth__footer">
                 Don&apos;t have a Doctor ID? Ask the hospital you work at —
-                they can issue one for you from their Hospital Portal.
+                they can issue one (with a starting password) for you from
+                their Hospital Portal.
               </p>
             </>
           )}
