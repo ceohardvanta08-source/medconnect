@@ -1,9 +1,66 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowRightIcon, PlusIcon, UserIcon } from "@/components/icons";
 
 export default function Hero() {
   return (
     <section id="home">
+      <style>{`
+        @keyframes mc-slide-right {
+          0%   { transform: translateX(0px);   }
+          50%  { transform: translateX(18px);  }
+          100% { transform: translateX(0px);   }
+        }
+
+        @keyframes mc-slide-left {
+          0%   { transform: translateX(0px);   }
+          50%  { transform: translateX(-18px); }
+          100% { transform: translateX(0px);   }
+        }
+
+        @keyframes mc-pulse-dot {
+          0%   { box-shadow: 0 0 0 0   rgba(22,163,74,0.45); }
+          65%  { box-shadow: 0 0 0 7px rgba(22,163,74,0);    }
+          100% { box-shadow: 0 0 0 0   rgba(22,163,74,0);    }
+        }
+
+        .mc-hero__float--emergency {
+          animation: mc-slide-right 4s ease-in-out infinite;
+        }
+
+        .mc-hero__float--doctor {
+          animation: mc-slide-left 5s ease-in-out infinite;
+        }
+
+        .mc-hero__online-dot {
+          display: inline-flex;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #16a34a;
+          animation: mc-pulse-dot 2.2s ease-in-out infinite;
+          flex-shrink: 0;
+        }
+
+        .mc-hero__card-online-wrap {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .mc-hero__float--emergency,
+          .mc-hero__float--doctor {
+            animation: none;
+          }
+          .mc-hero__online-dot {
+            animation: none;
+            box-shadow: none;
+          }
+        }
+      `}</style>
+
       <div className="mc-hero">
         {/* LEFT */}
         <div className="mc-hero__left">
@@ -44,7 +101,7 @@ export default function Hero() {
           {/* Teal glow blob */}
           <div className="mc-hero__blob" aria-hidden="true" />
 
-          {/* Floating: Emergency badge */}
+          {/* Floating: Emergency badge — slides horizontally */}
           <div className="mc-hero__float mc-hero__float--emergency">
             <span aria-hidden="true" style={{ fontSize: "18px" }}>
               🚑
@@ -65,7 +122,10 @@ export default function Hero() {
                 </div>
                 MEDCONNECT
               </div>
-              <div className="mc-hero__card-online">Online</div>
+              <div className="mc-hero__card-online-wrap">
+                <span className="mc-hero__online-dot" aria-hidden="true" />
+                <span>Online</span>
+              </div>
             </div>
 
             {/* Portal info */}
@@ -113,7 +173,7 @@ export default function Hero() {
             </div>
           </div>
 
-          {/* Floating: Doctor network */}
+          {/* Floating: Doctor network — slides horizontally (opposite direction) */}
           <div className="mc-hero__float mc-hero__float--doctor">
             <span aria-hidden="true" style={{ fontSize: "18px" }}>
               🩺

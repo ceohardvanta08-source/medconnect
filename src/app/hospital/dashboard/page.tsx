@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { clearHospitalSession, getHospitalSession } from "@/lib/session";
-import type { HospitalRecord, StatusValue } from "@/lib/data";
-import { DOCTOR_SPECIALTIES } from "@/lib/data";
+import type { HospitalRecord, StatusValue, PatientSeverity } from "@/lib/data";
+import { DOCTOR_SPECIALTIES, PATIENT_SEVERITIES } from "@/lib/data";
 
 const RESOURCE_CATEGORIES = [
   "Diagnostic",
@@ -108,6 +108,34 @@ function CountPill({ label, count, color }: { label: string; count: number; colo
   );
 }
 
+/** Colors for a patient's condition severity, shown on a doctor's patient list */
+const SEVERITY_META: Record<PatientSeverity, { label: string; bg: string; fg: string }> = {
+  critical: { label: "Critical", bg: "rgba(239,68,68,0.15)", fg: "#ef4444" },
+  stable: { label: "Stable", bg: "rgba(34,197,94,0.15)", fg: "#22c55e" },
+  recovering: { label: "Recovering", bg: "rgba(59,130,246,0.15)", fg: "#3b82f6" },
+  observation: { label: "Under Observation", bg: "rgba(249,115,22,0.15)", fg: "#f97316" },
+};
+
+function SeverityBadge({ severity }: { severity: PatientSeverity }) {
+  const meta = SEVERITY_META[severity];
+  return (
+    <span
+      style={{
+        borderRadius: "999px",
+        padding: "3px 10px",
+        fontSize: "11px",
+        fontWeight: 700,
+        letterSpacing: ".02em",
+        background: meta.bg,
+        color: meta.fg,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 export default function HospitalDashboardPage() {
   const router = useRouter();
   const [hospital, setHospital] = useState<HospitalRecord | null>(null);
@@ -129,6 +157,14 @@ export default function HospitalDashboardPage() {
   const [doctorSpecialty, setDoctorSpecialty] = useState<string>(DOCTOR_SPECIALTIES[0]);
   const [newDoctorCode, setNewDoctorCode] = useState<string | null>(null);
   const [newDoctorPassword, setNewDoctorPassword] = useState<string | null>(null);
+
+  // Doctor patient-assignment panel state
+  const [expandedDoctorId, setExpandedDoctorId] = useState<string | null>(null);
+  const [assignPatientName, setAssignPatientName] = useState("");
+  const [assignCondition, setAssignCondition] = useState("");
+  const [assignSeverity, setAssignSeverity] = useState<PatientSeverity>(PATIENT_SEVERITIES[0].value);
+  const [assigningDoctor, setAssigningDoctor] = useState(false);
+  const [dischargingCaseId, setDischargingCaseId] = useState<string | null>(null);
 
   const hospitalId = hospital?.id;
 
@@ -244,6 +280,56 @@ export default function HospitalDashboardPage() {
       setDoctorName("");
       setDoctorSpecialty(DOCTOR_SPECIALTIES[0]);
       await loadHospital(hospitalId);
+    }
+  }
+
+  function toggleDoctorExpand(doctorId: string) {
+    setExpandedDoctorId((current) => (current === doctorId ? null : doctorId));
+    setAssignPatientName("");
+    setAssignCondition("");
+    setAssignSeverity(PATIENT_SEVERITIES[0].value);
+  }
+
+  async function handleAssignPatient(event: FormEvent<HTMLFormElement>, doctorId: string) {
+    event.preventDefault();
+    if (!hospitalId || !assignPatientName || !assignCondition) return;
+
+    setAssigningDoctor(true);
+    try {
+      const response = await fetch(`/api/hospitals/${hospitalId}/doctors`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "assign",
+          doctorId,
+          patientName: assignPatientName,
+          condition: assignCondition,
+          severity: assignSeverity,
+        }),
+      });
+      if (response.ok) {
+        setAssignPatientName("");
+        setAssignCondition("");
+        setAssignSeverity(PATIENT_SEVERITIES[0].value);
+        await loadHospital(hospitalId);
+      }
+    } finally {
+      setAssigningDoctor(false);
+    }
+  }
+
+  async function handleDischargePatient(doctorId: string, patientCaseId: string) {
+    if (!hospitalId) return;
+    setDischargingCaseId(patientCaseId);
+    try {
+      const response = await fetch(`/api/hospitals/${hospitalId}/doctors`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "discharge", doctorId, patientCaseId }),
+      });
+      if (response.ok) await loadHospital(hospitalId);
+    } finally {
+      setDischargingCaseId(null);
     }
   }
 
@@ -725,19 +811,190 @@ export default function HospitalDashboardPage() {
                 <p className="mc-card__sub">No doctors added yet.</p>
               )}
               <div className="mc-list">
-                {hospital.doctors.map((doctor) => (
-                  <div key={doctor.id} className="mc-list-item">
-                    <div className="mc-list-item__icon" aria-hidden="true">
-                      🩺
+                {hospital.doctors.map((doctor) => {
+                  const isExpanded = expandedDoctorId === doctor.id;
+                  const patientCount = doctor.patients.length;
+                  const severityCounts = PATIENT_SEVERITIES.map((s) => ({
+                    ...s,
+                    count: doctor.patients.filter((p) => p.severity === s.value).length,
+                  })).filter((s) => s.count > 0);
+
+                  return (
+                    <div key={doctor.id} style={{ borderBottom: "1px solid var(--border, rgba(0,0,0,0.08))" }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleDoctorExpand(doctor.id)}
+                        className="mc-list-item"
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          borderBottom: "none",
+                        }}
+                      >
+                        <div className="mc-list-item__icon" aria-hidden="true">
+                          🩺
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div className="mc-list-item__title">{doctor.name}</div>
+                          <div className="mc-list-item__sub">
+                            {doctor.specialty} · ID: {doctor.doctorCode}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              color: "var(--text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {patientCount} patient{patientCount === 1 ? "" : "s"}
+                          </span>
+                          {severityCounts.map((s) => (
+                            <span
+                              key={s.value}
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: "999px",
+                                background: SEVERITY_META[s.value].bg,
+                                color: SEVERITY_META[s.value].fg,
+                              }}
+                            >
+                              {s.count} {s.label}
+                            </span>
+                          ))}
+                          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                            {isExpanded ? "▲" : "▼"}
+                          </span>
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div style={{ padding: "4px 4px 18px 44px" }}>
+                          {doctor.patients.length === 0 ? (
+                            <p className="mc-card__sub" style={{ marginBottom: "12px" }}>
+                              No patients currently assigned to this doctor.
+                            </p>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+                              {doctor.patients.map((patientCase) => (
+                                <div
+                                  key={patientCase.id}
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    flexWrap: "wrap",
+                                    gap: "10px",
+                                    background: "rgba(0,0,0,0.02)",
+                                    borderRadius: "8px",
+                                    padding: "10px 12px",
+                                  }}
+                                >
+                                  <div>
+                                    <p style={{ fontWeight: 700, fontSize: "13px" }}>
+                                      {patientCase.patientName}
+                                    </p>
+                                    <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                                      {patientCase.condition} · assigned{" "}
+                                      {new Date(patientCase.assignedAt).toLocaleDateString()}
+                                    </p>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <SeverityBadge severity={patientCase.severity} />
+                                    <button
+                                      type="button"
+                                      className="mc-btn mc-btn--outline"
+                                      disabled={dischargingCaseId === patientCase.id}
+                                      onClick={() => handleDischargePatient(doctor.id, patientCase.id)}
+                                      style={{ padding: "5px 12px", fontSize: "12px" }}
+                                    >
+                                      {dischargingCaseId === patientCase.id ? "..." : "Discharge"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <form
+                            onSubmit={(event) => handleAssignPatient(event, doctor.id)}
+                            style={{
+                              border: "1px dashed var(--border-strong, rgba(0,0,0,0.15))",
+                              borderRadius: "10px",
+                              padding: "14px",
+                            }}
+                          >
+                            <p style={{ fontWeight: 700, fontSize: "13px", marginBottom: "10px" }}>
+                              Assign a patient to Dr. {doctor.name.replace(/^Dr\.?\s*/i, "")}
+                            </p>
+                            <div className="mc-grid-2" style={{ gap: "10px" }}>
+                              <div className="mc-auth__field" style={{ margin: 0 }}>
+                                <label className="mc-auth__label" htmlFor={`assign-name-${doctor.id}`}>
+                                  Patient name
+                                </label>
+                                <input
+                                  id={`assign-name-${doctor.id}`}
+                                  type="text"
+                                  className="mc-auth__input"
+                                  placeholder="A. Verma"
+                                  value={assignPatientName}
+                                  onChange={(event) => setAssignPatientName(event.target.value)}
+                                />
+                              </div>
+                              <div className="mc-auth__field" style={{ margin: 0 }}>
+                                <label className="mc-auth__label" htmlFor={`assign-severity-${doctor.id}`}>
+                                  Condition severity
+                                </label>
+                                <select
+                                  id={`assign-severity-${doctor.id}`}
+                                  className="mc-auth__input"
+                                  value={assignSeverity}
+                                  onChange={(event) =>
+                                    setAssignSeverity(event.target.value as PatientSeverity)
+                                  }
+                                >
+                                  {PATIENT_SEVERITIES.map((s) => (
+                                    <option key={s.value} value={s.value}>
+                                      {s.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="mc-auth__field" style={{ margin: "10px 0" }}>
+                              <label className="mc-auth__label" htmlFor={`assign-condition-${doctor.id}`}>
+                                Condition / reason
+                              </label>
+                              <input
+                                id={`assign-condition-${doctor.id}`}
+                                type="text"
+                                className="mc-auth__input"
+                                placeholder="e.g. Post-surgery recovery, cardiac monitoring"
+                                value={assignCondition}
+                                onChange={(event) => setAssignCondition(event.target.value)}
+                              />
+                            </div>
+                            <button
+                              type="submit"
+                              className="mc-btn mc-btn--primary"
+                              disabled={assigningDoctor || !assignPatientName || !assignCondition}
+                              style={{ fontSize: "13px" }}
+                            >
+                              {assigningDoctor ? "Assigning..." : "Assign patient"}
+                            </button>
+                          </form>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div className="mc-list-item__title">{doctor.name}</div>
-                      <div className="mc-list-item__sub">
-                        {doctor.specialty} · ID: {doctor.doctorCode}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

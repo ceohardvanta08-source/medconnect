@@ -37,6 +37,7 @@ export interface DoctorRecord {
   name: string;
   specialty: string;
   doctorCode: string;
+  patients: PatientCase[];
 }
 
 export interface EmergencyAlert {
@@ -47,6 +48,24 @@ export interface EmergencyAlert {
   status: EmergencyStatus;
   createdAt: string; // ISO timestamp
 }
+
+/** How serious a patient's current condition is, used on the doctor's patient list */
+export type PatientSeverity = "critical" | "stable" | "recovering" | "observation";
+
+export interface PatientCase {
+  id: string;
+  patientName: string;
+  condition: string;
+  severity: PatientSeverity;
+  assignedAt: string; // ISO timestamp
+}
+
+export const PATIENT_SEVERITIES: { value: PatientSeverity; label: string }[] = [
+  { value: "critical", label: "Critical" },
+  { value: "stable", label: "Stable" },
+  { value: "recovering", label: "Recovering" },
+  { value: "observation", label: "Under Observation" },
+];
 
 export interface HospitalRecord {
   id: string;
@@ -257,6 +276,7 @@ export function addDoctor(
     name: input.name,
     specialty: input.specialty,
     doctorCode: makeDoctorCode(),
+    patients: [],
   };
   hospital.doctors.push(doctor);
 
@@ -286,6 +306,42 @@ export function loginDoctor(
   const doctor = hospital?.doctors.find((d) => d.id === auth.doctorId);
   if (!doctor) return { ok: false, error: "Doctor record not found." };
   return { ok: true, doctor };
+}
+
+// ---- Doctor patient assignments ----
+
+export function assignPatientToDoctor(
+  hospitalId: string,
+  doctorId: string,
+  input: { patientName: string; condition: string; severity: PatientSeverity }
+): PatientCase | undefined {
+  const hospital = store.hospitals.find((h) => h.id === hospitalId);
+  const doctor = hospital?.doctors.find((d) => d.id === doctorId);
+  if (!doctor) return undefined;
+
+  const patientCase: PatientCase = {
+    id: makeId("pt"),
+    patientName: input.patientName,
+    condition: input.condition,
+    severity: input.severity,
+    assignedAt: new Date().toISOString(),
+  };
+  doctor.patients.unshift(patientCase);
+  return patientCase;
+}
+
+export function dischargePatientFromDoctor(
+  hospitalId: string,
+  doctorId: string,
+  patientCaseId: string
+): boolean {
+  const hospital = store.hospitals.find((h) => h.id === hospitalId);
+  const doctor = hospital?.doctors.find((d) => d.id === doctorId);
+  if (!doctor) return false;
+
+  const before = doctor.patients.length;
+  doctor.patients = doctor.patients.filter((p) => p.id !== patientCaseId);
+  return doctor.patients.length < before;
 }
 
 // ---- Emergency alerts (SOS) ----
